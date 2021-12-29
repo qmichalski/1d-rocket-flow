@@ -17,6 +17,8 @@ class Massflow_Solution(ct.Solution):
     Inherit the Solution class from Cantera to add the following methods:
         self.HS
         self.HS = H, S
+        self.gas_constant
+        self.dpde_cr
         self.soundSpeed
         self.chokedNozzle
         

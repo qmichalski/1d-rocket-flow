@@ -9,17 +9,20 @@ import numpy as np
 import matplotlib.pyplot as plt
 import massflowlib
 
-__version__ = 0.1
+__version__ = 0.2
 
 class Quasi1DCompressibleFlow():
     def __init__(
-        self, grid, A, fluidModel='cantera', mech='gri30_highT.cti'
+        self, grid, A, fluidModel='cantera', mech=None, k=None, Mgas=None
     ):
         self.fluidModel_list = ['cantera','perfectgas']
         if fluidModel in self.fluidModel_list:
             self.fluidModel = fluidModel
             if fluidModel == 'cantera':
                 self.gas = massflowlib.Massflow_Solution(mech)
+            if fluidModel == 'perfectgas':
+                self.k = k
+                self.Mgas = Mgas
         else:
             print('Model not in model list')
             print('Models available are {}'.format(self.fluidModel))
@@ -45,6 +48,7 @@ class Quasi1DCompressibleFlow():
         self.SV_residuals = np.array([np.ones(self.nbrPoints),
                                       np.ones(self.nbrPoints), 
                                       np.ones(self.nbrPoints)])
+        self.status = 'created'
         
     def setInitialTimeState(self,initialState):
         for stateVariable in initialState:
@@ -56,6 +60,7 @@ class Quasi1DCompressibleFlow():
                 if stateVariable == 'e':
                     self.e = initialState[stateVariable]
                 self.SV = np.array([self.r,self.u,self.e])
+                self.status = 'initialized'
             else:
                 print('Wrong number of points in {} during initialization'.format(stateVariable))
                 
@@ -95,12 +100,13 @@ class Quasi1DCompressibleFlow():
                 self.rgas[ii] = self.gas.gas_constant/self.gas.mean_molecular_weight
                 self.dpde_rc[ii] = self.gas.dpde_cr()
             if self.fluidModel == 'perfectgas':
-                self.rgas[ii] = 8.314/0.028
-                self.cv[ii] = self.rgas[ii]/(1.4-1)
+                self.rgas[ii] = 8.314/self.Mgas
+                self.cv[ii] = self.rgas[ii]/(self.k-1)
                 self.T[ii] = self.e[ii]/self.cv[ii]
-                self.a[ii] = (self.rgas[ii]/self.cv[ii]+1)*self.rgas[ii]*self.T[ii]
+                self.a[ii] = ((self.rgas[ii]/self.cv[ii]+1)*self.rgas[ii]*self.T[ii])**(0.5)
                 self.p[ii] = self.rgas[ii]*self.r[ii]*self.T[ii]
                 self.M[ii] = z[1]/self.a[ii]
+                self.dpde_rc[ii] = self.p[ii]/self.e[ii]
      
     def _dSV_dt(self,method):
         # Making sure all variables are updated
@@ -121,9 +127,6 @@ class Quasi1DCompressibleFlow():
             M = [[u         ,r    ,0        ],
                  [p/(r**2)  ,u    ,1/r*dpde_rc],
                  [0         ,p/r  ,u        ]]
-            # M = [[u         ,r    ,0        ],
-            #      [p/(r**2)  ,u    ,p/(r*e) ],
-            #      [0         ,p/r  ,u        ]]
             C = [r*u*dlnA_dx[ii],
                  0,
                  p*u/r*dlnA_dx[ii]]
@@ -200,7 +203,7 @@ class Quasi1DCompressibleFlow():
                            plot=False,
                            plotStep=100,
                            showConvergenceProgress=False,
-                           method='MacCormack'):
+                           method='MacCormack-1'):
         '''
         Performs the integration of 
         '''
@@ -259,14 +262,20 @@ class Quasi1DCompressibleFlow():
                     ax[ii].set_xlabel('Axial position [m]')
                 else:
                     fig,ax = plt.subplots(10,1,figsize=(6, 10), dpi=400)
-        plt.show()
-        plt.rcParams['xtick.labelbottom'] = True
+        
+        if plot:
+            plt.show()
+            plt.rcParams['xtick.labelbottom'] = True
+        status = 'solved'
         if fullOutput:
             sol = {}
             sol['max_residuals'] = np.array(residuals)
             sol['iterations'] = np.linspace(0,step-1,step)
             return(sol)
 
+    def writeResults(self):
+        import h5py
+        
 def _test__dSV_dx():
     # Test of the differentiation method
     # Check that the array method returns the same output as the 
