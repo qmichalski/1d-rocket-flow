@@ -13,8 +13,8 @@ import matplotlib.pyplot as plt
 
 Afun = lambda x: 1 + 2.2*(x-1.5)**2
 
-length = 2.9
-grid = np.linspace(0,length,30)
+length = 3
+grid = np.linspace(0,length,61)
 
 T0 = 2000
 p0 = 25e5
@@ -29,24 +29,34 @@ throatIndex = np.argmin(A)
 
 massflow0 = velocity*density*A[throatIndex]
 # print(massflow0)
-q1DCF = flowsolver.Quasi1DCompressibleFlow(grid,A=A,fluidModel='cantera',mech=mech)
+# fluidModel = 'cantera'
+fluidModel = 'cantera'
+if fluidModel == 'cantera':
+    q1DCF = flowsolver.Quasi1DCompressibleFlow(grid,A=A,fluidModel=fluidModel,mech=mech)
+    
+    Tfun = lambda x: T0*(-1/3*x+1)
+    p00 = p0
+    
+    q1DCF.gas.TPX = Tfun(0), p00, X0
+    e00 = q1DCF.gas.int_energy_mass
+    r00 = q1DCF.gas.density
+    a00 = q1DCF.gas.soundSpeed()
+    cp00 = q1DCF.gas.cp_mass
+    u00 = massflow0 / (r00*A[0])
+    h00 = q1DCF.gas.enthalpy_mass
+    ht0 = h00 + 0.5*u00**2
+    s00 = q1DCF.gas.entropy_mass
+    q1DCF.gas.HS = ht0, s00
 
-Tfun = lambda x: T0*(-1/3*x+1)
-p00 = p0
+if fluidModel == 'perfectgas':
+    q1DCF = flowsolver.Quasi1DCompressibleFlow(grid,A=A,fluidModel=fluidModel)
+    rgas = 8.314/0.028
+    cv = rgas/(1.4-1)
+    r00 = p0/(rgas*T0)
+    e00 = cv*T0
 
-q1DCF.gas.TPX = Tfun(0), p00, X0
-e00 = q1DCF.gas.int_energy_mass
-r00 = q1DCF.gas.density
-a00 = q1DCF.gas.soundSpeed()
-cp00 = q1DCF.gas.cp_mass
-u00 = massflow0 / (r00*A[0])
-h00 = q1DCF.gas.enthalpy_mass
-ht0 = h00 + 0.5*u00**2
-s00 = q1DCF.gas.entropy_mass
-q1DCF.gas.HS = ht0, s00
-
-velocity,density,throatPressure = q1DCF.gas.chokedNozzle(isentropicEfficiency=1, frozen=True)
-massflow0 = velocity*density*A[throatIndex]
+    # velocity,density,throatPressure = q1DCF.gas.chokedNozzle(isentropicEfficiency=1, frozen=True)
+    # massflow0 = velocity*density*A[throatIndex]
 # print(massflow0)
 
 rfun = lambda x: r00*(-0.3146*x+1)
@@ -63,10 +73,10 @@ q1DCF.setInitialTimeState(initialTimeState)
 
 sol = q1DCF.solveSteadyQuasi1D(  CFL=0.5,
                                  tol=1e-6, 
-                                 maxSteps=None, 
+                                 maxSteps=10000, 
                                  fullOutput=True, 
                                  plot=True,
-                                 plotStep=100,
+                                 plotStep=1000,
                                  showConvergenceProgress=False,
                                  method='MacCormack-1'    ) #MacCormack
 

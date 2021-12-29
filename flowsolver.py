@@ -6,7 +6,6 @@ Created on Mon Dec 27 14:27:42 2021
 """
 
 import numpy as np
-import cantera as ct
 import matplotlib.pyplot as plt
 import massflowlib
 
@@ -36,6 +35,8 @@ class Quasi1DCompressibleFlow():
         self.cv = np.zeros(self.nbrPoints) # static temperature array
         self.M = np.zeros(self.nbrPoints) # Mach number array
         self.a = np.zeros(self.nbrPoints) # local sound speed
+        self.dpde_rc = np.zeros(self.nbrPoints) # derivative of p relative to e at constant r 
+        self.rgas = np.zeros(self.nbrPoints) # gas constant per unit of mass R/m
         self.SV_names = ['r','u','e'] # state variable list
         self.SV = np.array([self.r,self.u,self.e]) # stores the state variables
         self.SV_nbr = len(self.SV_names) # number of state variables
@@ -83,13 +84,23 @@ class Quasi1DCompressibleFlow():
             self.r[ii] = z[0]
             self.u[ii] = z[1]
             self.e[ii] = z[2]
-            self.gas.UV = z[2], 1/z[0]
-            self.a[ii] = self.gas.soundSpeed(frozen=True)
-            self.p[ii] = self.gas.P
-            self.T[ii] = self.gas.T
-            self.h[ii] = self.gas.enthalpy_mass
-            self.M[ii] = z[1]/self.a[ii]
-            self.cv[ii] = self.gas.cv_mass
+            if self.fluidModel == 'cantera':
+                self.gas.UV = z[2], 1/z[0]
+                self.a[ii] = self.gas.soundSpeed(frozen=True)
+                self.p[ii] = self.gas.P
+                self.T[ii] = self.gas.T
+                self.h[ii] = self.gas.enthalpy_mass
+                self.M[ii] = z[1]/self.a[ii]
+                self.cv[ii] = self.gas.cv_mass
+                self.rgas[ii] = self.gas.gas_constant/self.gas.mean_molecular_weight
+                self.dpde_rc[ii] = self.gas.dpde_cr()
+            if self.fluidModel == 'perfectgas':
+                self.rgas[ii] = 8.314/0.028
+                self.cv[ii] = self.rgas[ii]/(1.4-1)
+                self.T[ii] = self.e[ii]/self.cv[ii]
+                self.a[ii] = (self.rgas[ii]/self.cv[ii]+1)*self.rgas[ii]*self.T[ii]
+                self.p[ii] = self.rgas[ii]*self.r[ii]*self.T[ii]
+                self.M[ii] = z[1]/self.a[ii]
      
     def _dSV_dt(self,method):
         # Making sure all variables are updated
@@ -99,16 +110,20 @@ class Quasi1DCompressibleFlow():
         self._dSV_dx(method)
         dlnA_dx = self.dlnA_dx
         dSV_dx = self.dSV_dx
-        for ii,z in enumerate(zip(self.r,self.u,self.e,self.p,self.T,self.cv)):
+        for ii,z in enumerate(zip(self.r,self.u,self.e,self.p,self.T,self.cv,self.dpde_rc)):
             r = z[0]
             u = z[1]
             e = z[2]
             p = z[3]
             T = z[4]
             cv = z[5]
+            dpde_rc = z[6]
             M = [[u         ,r    ,0        ],
-                 [p/(r**2)  ,u    ,p/(r*e) ],
+                 [p/(r**2)  ,u    ,1/r*dpde_rc],
                  [0         ,p/r  ,u        ]]
+            # M = [[u         ,r    ,0        ],
+            #      [p/(r**2)  ,u    ,p/(r*e) ],
+            #      [0         ,p/r  ,u        ]]
             C = [r*u*dlnA_dx[ii],
                  0,
                  p*u/r*dlnA_dx[ii]]

@@ -24,7 +24,11 @@ class Massflow_Solution(ct.Solution):
     def __init__(self, *args):
         ct.Solution.__init__(self, *args)
 
+    @property
+    def gas_constant(self):
+        return(ct.gas_constant)
     # Defining actions to compute and read a state HS from a Cantera gas object
+    
     @property
     def HS(self):
         '''
@@ -53,7 +57,7 @@ class Massflow_Solution(ct.Solution):
         P1 = brentq(fun,1e2,1e8)
         # Return the gas to its initial state
         self.HP = H,P1
-    
+        
     def _HSDiff(self,Pguess,S):
         '''
         Intermediary function that is then called in root finder
@@ -70,7 +74,21 @@ class Massflow_Solution(ct.Solution):
         # Return gas to initial state
         self.HP = H,P
         return error
-            
+
+    def dpde_cr(self):
+        # save properties
+        e0 = self.int_energy_mass
+        p0 = self.P
+        r0 = self.density
+        e1 = e0*1.0001
+        self.UV = e1, 1/r0
+        p1 = self.P
+        # drhodP_cH = (r1 - r0)/(p1 - p0)
+        dpde_cr_val = (p1-p0)/(e1-e0)
+        # Return the gas object to its original state 
+        self.UV = e0, 1/r0
+        return dpde_cr_val
+
     def soundSpeed(self,frozen=True):
         """
         Returns the frozen sound speed for a gas by using a finite-difference 
