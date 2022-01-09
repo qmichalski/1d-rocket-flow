@@ -22,14 +22,20 @@ throatMachSet = np.zeros(len(nbrPointsSet))
 for ii,nbrPoint in enumerate(nbrPointsSet):
  
     geometry = geometrylib.OneDGeometry()
-    geometry.andersonConstructor()
+    geometry.andersonConstructor(nbrPoints=51)
+    # geometry.rocketEngineConstructor(combustionChamberLength=200e-3,
+                                     # chamberDiameter=50e-3, 
+                                     # convergentAngle=45, 
+                                     # throatDiameter=25e-3, 
+                                     # roughness=10e-6,
+                                     # nbrPoints=60)
     
     T0 = 2000
     p0 = 25e5
     X0 = 'N2:1'
     mech = 'gri30_highT.cti'
-    
-    gasTest = massflowlib.Massflow_Solution(mech)
+    submech = 'gri30_mix'
+    gasTest = massflowlib.Massflow_Solution(mech,submech)
     gasTest.TPX = T0, p0, X0
     velocity,density,throatPressure = gasTest.chokedNozzle(isentropicEfficiency=1, frozen=True)
 
@@ -44,9 +50,10 @@ for ii,nbrPoint in enumerate(nbrPointsSet):
         q1DCF = flowsolver.Quasi1DCompressibleFlow(geometry,
                                                    fluidModel=fluidModel,
                                                    mech=mech, 
+                                                   submech=submech,
                                                    Tw=300,
-                                                   wallHeatFluxCorrelation='adiabatic',
-                                                   wallShearStressCorrelation='non-viscous')
+                                                   wallHeatFluxCorrelation='bartz',
+                                                   wallShearStressCorrelation='moody_bulk') # non-viscous
         q1DCF.gas.TPX = T0, p0, X0
         e00 = q1DCF.gas.int_energy_mass
         r00 = q1DCF.gas.density
@@ -93,7 +100,7 @@ for ii,nbrPoint in enumerate(nbrPointsSet):
                                      maxSteps=None, 
                                      fullOutput=True, 
                                      plot=True,
-                                     plotStep=1000,
+                                     plotStep=100,
                                      showConvergenceProgress=False,
                                      method='MacCormack' ) #MacCormack
     
@@ -113,8 +120,10 @@ for ii,nbrPoint in enumerate(nbrPointsSet):
     plt.xlabel('Iteration [-]')
     plt.ylabel('Max of normalized residuals [-]')
     plt.yscale('log')
+    plt.show()
     
     plt.plot(nbrPointsSet,abs(throatMachSet-1)*100,'-d',label='Residual of Mach at throat')
     plt.plot(nbrPointsSet,abs(massflowRatioSet-1)*100,'-o',label='Residual of mass flow')
     plt.legend()
+    plt.show()
 

@@ -106,18 +106,18 @@ class OneDGeometry():
             
             plt.show()
         
-    def andersonConstructor(self,nbrPoint=51, roughness=10e-6, plot=False):
+    def andersonConstructor(self, nbrPoints=51, roughness=10e-6, plot=False):
         import numpy as np
         import matplotlib.pyplot as plt
         Afun = lambda x: 1 + 2.2*(x-1.5)**2
         length = 3
-        grid = np.linspace(0,length,nbrPoint)
+        grid = np.linspace(0,length,nbrPoints)
         self.grid = grid
         self.crossSection = Afun(grid)
         self.hydraulicDiameter = (4*Afun(grid)/np.pi)**(1/2)
         self.hydraulicPerimeter = 2*np.pi*self.hydraulicDiameter
         self.heatExchangePerimeter = self.hydraulicPerimeter
-        self.roughness = roughness*np.ones(nbrPoint)
+        self.roughness = roughness*np.ones(nbrPoints)
         if plot:
             RC = np.max(self.hydraulicDiameter)
             plt.figure(figsize=(6, 6*5*RC/(length*1.2)), dpi=400)

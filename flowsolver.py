@@ -19,7 +19,8 @@ class Quasi1DCompressibleFlow():
         wallHeatFluxCorrelation='adiabatic',
         wallShearStressCorrelation='non-viscous',
         Tw=300,
-        mech=None, 
+        mech=None,
+        submech=None,
         k=None, 
         Mgas=None
     ):
@@ -27,7 +28,7 @@ class Quasi1DCompressibleFlow():
         if fluidModel in self.fluidModel_list:
             self.fluidModel = fluidModel
             if fluidModel == 'cantera':
-                self.gas = massflowlib.Massflow_Solution(mech)
+                self.gas = massflowlib.Massflow_Solution(mech,submech)
             if fluidModel == 'perfectgas':
                 self.k = k
                 self.Mgas = Mgas
@@ -282,37 +283,37 @@ class Quasi1DCompressibleFlow():
                 if 'fig' in locals():
                     plt.rcParams['xtick.labelbottom'] = False
                     ii=0
-                    ax[ii].plot(self.grid,self.r,label=str(step))
+                    ax[ii].plot(self.Geometry.grid,self.r,label=str(step))
                     ax[ii].set_ylabel('Density [kg/m3]')
                     ii=ii+1
-                    ax[ii].plot(self.grid,self.u,label=str(step))
+                    ax[ii].plot(self.Geometry.grid,self.u,label=str(step))
                     ax[ii].set_ylabel('Velocity [m/s]')
                     ii=ii+1
-                    ax[ii].plot(self.grid,self.e,label=str(step))
+                    ax[ii].plot(self.Geometry.grid,self.e,label=str(step))
                     ax[ii].set_ylabel('Internal energy [J/kg]')
                     ii=ii+1
-                    ax[ii].plot(self.grid,self.p/1e5,label=str(step))
+                    ax[ii].plot(self.Geometry.grid,self.p/1e5,label=str(step))
                     ax[ii].set_ylabel('Pressure [bar]')
                     ii=ii+1
-                    ax[ii].plot(self.grid,self.T,label=str(step))
+                    ax[ii].plot(self.Geometry.grid,self.T,label=str(step))
                     ax[ii].set_ylabel('Temperature [K]')
                     ii=ii+1
-                    ax[ii].plot(self.grid,self.r*self.u*self.A,label=str(step))
+                    ax[ii].plot(self.Geometry.grid,self.r*self.u*self.A,label=str(step))
                     ax[ii].set_ylabel('Mass flow [kg/s]')
                     ii=ii+1
-                    ax[ii].plot(self.grid,self.M,label=str(step))
+                    ax[ii].plot(self.Geometry.grid,self.M,label=str(step))
                     ax[ii].set_ylabel('Mach [-]')
                     ax[ii].tick_params(axis='x',labelbottom='off') # labels along the bottom edge are off
                     ii=ii+1
-                    ax[ii].plot(self.grid,self.SV_residuals[0,:],label=str(step))
+                    ax[ii].plot(self.Geometry.grid,self.SV_residuals[0,:],label=str(step))
                     ax[ii].set_ylabel('Mass equation residuals [-]')
                     ax[ii].set_yscale('log')
                     ii=ii+1
-                    ax[ii].plot(self.grid,self.SV_residuals[1,:],label=str(step))
+                    ax[ii].plot(self.Geometry.grid,self.SV_residuals[1,:],label=str(step))
                     ax[ii].set_ylabel('Momentum equation residuals [-]')
                     ax[ii].set_yscale('log')
                     ii=ii+1
-                    ax[ii].plot(self.grid,self.SV_residuals[2,:],label=str(step))
+                    ax[ii].plot(self.Geometry.grid,self.SV_residuals[2,:],label=str(step))
                     ax[ii].set_ylabel('Energy equation residuals [-]')
                     ax[ii].set_yscale('log')
                     ax[ii].tick_params(axis='x',labelbottom='off') # labels along the bottom edge are off
