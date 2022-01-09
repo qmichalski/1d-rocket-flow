@@ -8,12 +8,20 @@ Created on Mon Dec 27 14:27:42 2021
 import numpy as np
 import matplotlib.pyplot as plt
 import massflowlib
+import correlationlib
 
-__version__ = 0.2
+__version__ = 0.3 
 
 class Quasi1DCompressibleFlow():
     def __init__(
-        self, grid, A, fluidModel='cantera', mech=None, k=None, Mgas=None
+        self, Geometry, 
+        fluidModel='cantera',
+        wallHeatFluxCorrelation='adiabatic',
+        wallShearStressCorrelation='non-viscous',
+        Tw=300,
+        mech=None, 
+        k=None, 
+        Mgas=None
     ):
         self.fluidModel_list = ['cantera','perfectgas']
         if fluidModel in self.fluidModel_list:
@@ -26,9 +34,9 @@ class Quasi1DCompressibleFlow():
         else:
             print('Model not in model list')
             print('Models available are {}'.format(self.fluidModel))
-        self.grid = grid # spatial discretisation of the 1d problem
-        self.nbrPoints = len(grid) # number of points in grid
-        self.A = A  # area
+        self.Geometry = Geometry
+        self.A = self.Geometry.crossSection
+        self.nbrPoints = len(Geometry.grid) # number of points in grid
         self.p = np.zeros(self.nbrPoints) # static pressure array
         self.r = np.zeros(self.nbrPoints) # static density array
         self.e = np.zeros(self.nbrPoints) # static internal energy array
@@ -40,10 +48,18 @@ class Quasi1DCompressibleFlow():
         self.a = np.zeros(self.nbrPoints) # local sound speed
         self.dpde_rc = np.zeros(self.nbrPoints) # derivative of p relative to e at constant r 
         self.rgas = np.zeros(self.nbrPoints) # gas constant per unit of mass R/m
+        # Heat exchange properties
+        self.wallHeatFluxCorrelation = wallHeatFluxCorrelation
+        self.wallShearStressCorrelation = wallShearStressCorrelation
+        self.Tw = Tw*np.ones(self.nbrPoints)
+        self.hConv = np.zeros(self.nbrPoints)
+        self.dQdx = np.zeros(self.nbrPoints)
+        self.flux = np.zeros(self.nbrPoints)
+        self.tau_w = np.zeros(self.nbrPoints)
         self.SV_names = ['r','u','e'] # state variable list
         self.SV = np.array([self.r,self.u,self.e]) # stores the state variables
         self.SV_nbr = len(self.SV_names) # number of state variables
-        self.dx = self.grid[1]-self.grid[0] # spatial step
+        self.dx = self.Geometry.grid[1]-self.Geometry.grid[0] # spatial step
         # Store the residual value of the state variables
         self.SV_residuals = np.array([np.ones(self.nbrPoints),
                                       np.ones(self.nbrPoints), 
@@ -65,14 +81,18 @@ class Quasi1DCompressibleFlow():
                 print('Wrong number of points in {} during initialization'.format(stateVariable))
                 
     def _dSV_dx(self,method):
-        if method == 'backward-1':
+        '''
+        Method
+        Spatial differentiation of state variables AND 1D cross-section
+        '''
+        if method == 'backward':
             SV_spatialBackwardDiff = np.zeros((3,self.nbrPoints))
             SV_spatialBackwardDiff[:,1:] = (self.SV[:,1:] - self.SV[:,0:-1])/self.dx
             self.dSV_dx = SV_spatialBackwardDiff
             dlnA_dx = np.zeros(self.nbrPoints)
             dlnA_dx[1:] = (np.log(self.A[1:]) - np.log(self.A[0:-1]))/self.dx
             self.dlnA_dx = dlnA_dx
-        if method == 'forward-1':
+        if method == 'forward':
             SV_spatialForwardDiff = np.zeros((3,self.nbrPoints))
             SV_spatialForwardDiff[:,:-1] = (self.SV[:,1:] - self.SV[:,0:-1])/self.dx
             self.dSV_dx = SV_spatialForwardDiff
@@ -82,6 +102,7 @@ class Quasi1DCompressibleFlow():
 
     def _SV(self,SV):
         '''
+        Method
         Update all gas values based on state variables
         '''
         self.SV = SV
@@ -107,45 +128,107 @@ class Quasi1DCompressibleFlow():
                 self.p[ii] = self.rgas[ii]*self.r[ii]*self.T[ii]
                 self.M[ii] = z[1]/self.a[ii]
                 self.dpde_rc[ii] = self.p[ii]/self.e[ii]
-     
-    def _dSV_dt(self,method):
-        # Making sure all variables are updated
-        dSV_dt = np.zeros((3,self.nbrPoints))
-        dx = self.dx
-        A = self.A
-        self._dSV_dx(method)
-        dlnA_dx = self.dlnA_dx
-        dSV_dx = self.dSV_dx
-        for ii,z in enumerate(zip(self.r,self.u,self.e,self.p,self.T,self.cv,self.dpde_rc)):
+    
+    def _hConv(self):
+        '''
+        Method
+        Update the value of the convection coefficient at current SV values
+        '''
+        Tw = self.Tw
+        Dh = self.Geometry.hydraulicDiameter
+        for ii,z in enumerate(zip(self.r,self.u,self.e)):    
             r = z[0]
             u = z[1]
             e = z[2]
-            p = z[3]
-            T = z[4]
-            cv = z[5]
-            dpde_rc = z[6]
+            # updating the gas but might not have to if called before _SV
+            # would definitly speed the process not too
+            self.gas.UV = e, 1/r
+            parameters = {}
+            parameters['wallHeatFluxCorrelation'] = self.wallHeatFluxCorrelation
+            parameters['wallTemperature'] = Tw[ii]
+            parameters['chamberDiameter'] = Dh[ii]
+            parameters['bulkFlowVelocity'] = u
+            self.hConv[ii] = correlationlib.wallHeatFluxCorrelation(self.gas, parameters)
+    
+    def _dQdx(self):
+        '''
+        Method
+        Update the value of the differential surface flux at current SV values
+        '''
+        self._hConv()
+        flux = self.hConv*(self.Tw - self.T)
+        dQdx = self.Geometry.heatExchangePerimeter*flux
+        self.flux = flux
+        self.dQdx = dQdx
+    
+    def _tau_w(self):
+        '''
+        Method
+        Update the value of the wall friction coefficient at current SV values
+        '''
+        Ph = self.Geometry.hydraulicPerimeter
+        roughness = self.Geometry.roughness
+        for ii,z in enumerate(zip(self.r,self.u,self.e)):    
+            r = z[0]
+            u = z[1]
+            e = z[2]
+            # updating the gas but might not have to if called before _SV
+            # would definitly speed the process not too
+            self.gas.UV = e, 1/r
+            parameters = {}
+            parameters['wallShearStressCorrelation'] = self.wallShearStressCorrelation
+            parameters['bulkFlowVelocity'] = u
+            parameters['area'] = self.A[ii]
+            parameters['hydraulicPerimeter'] = Ph[ii]
+            parameters['roughness'] = roughness[ii]
+            self.tau_w[ii] = correlationlib.wallShearStressCorrelation(self.gas, parameters)
+    
+    def _dSV_dt(self,method):
+        '''
+        Method
+        Compute the time derivative value
+        '''
+        dSV_dt = np.zeros((3,self.nbrPoints))
+        
+        self._dSV_dx(method)
+        self._dQdx()
+        self._tau_w()
+    
+        dSV_dx = self.dSV_dx
+        
+        for ii,z in enumerate(zip(self.r,self.u,self.e)):
+            r = z[0]
+            u = z[1]
+            e = z[2]
+            p = self.p[ii]
+            dpde_rc = self.dpde_rc[ii]
+            A = self.Geometry.crossSection[ii]
+            Ph = self.Geometry.hydraulicPerimeter[ii]
+            dQdx = self.dQdx[ii]
+            tau_w = self.tau_w[ii]
+            dlnA_dx = self.dlnA_dx[ii]
             M = [[u         ,r    ,0        ],
                  [p/(r**2)  ,u    ,1/r*dpde_rc],
                  [0         ,p/r  ,u        ]]
-            C = [r*u*dlnA_dx[ii],
-                 0,
-                 p*u/r*dlnA_dx[ii]]
+            C = [r*u*dlnA_dx,
+                 1/r*tau_w*Ph/A,
+                 1/(r*r*u*A)*dQdx + p*u/r*dlnA_dx]
             dSV_dt[:,ii] = - np.matmul(M, np.transpose(dSV_dx[:,ii])) - C
         self.dSV_dt = dSV_dt
 
-    def _integrationStep(self,CFL,method='MacCormack-1'):
+    def _integrationStep(self,CFL,method='MacCormack'):
         # Adaptive dt for stability using constant CFL
         dt = CFL*np.min(self.dx/(self.u+self.a))
         initial_SV = self.SV
-        if method == 'MacCormack-1':
+        if method == 'MacCormack':
             # Calculation of the predictor
-            self._dSV_dt('forward-1')
+            self._dSV_dt('forward')
             predictor_dSV_dt = self.dSV_dt
             predictor_SV = initial_SV + predictor_dSV_dt*dt
             # evaluation of SV at predictor values
             self._SV(predictor_SV)
             # Calculation of the corrector from predictor values
-            self._dSV_dt('backward-1')
+            self._dSV_dt('backward')
             corrector_dSV_dt = self.dSV_dt
             # Calculation of the final time derivative (second order accuracy)
             averaged_dSV_dt = 0.5*(predictor_dSV_dt+corrector_dSV_dt)
@@ -159,35 +242,7 @@ class Quasi1DCompressibleFlow():
             final_SV[0,-1]=2*final_SV[0,-2]-final_SV[0,-3] 
             final_SV[1,-1]=2*final_SV[1,-2]-final_SV[1,-3]
             final_SV[2,-1]=2*final_SV[2,-2]-final_SV[2,-3]
-            
-        if method == 'RK45':
-            # Calculation of the predictor
-            self._dSV_dt('forward-1') 
-            k1 = self.dSV_dt
-            ynk1 = initial_SV + k1*dt/2
-            self._SV(ynk1)
-            self._dSV_dt('backward-1') 
-            k2 = self.dSV_dt
-            ynk2 = initial_SV + k2*dt/2
-            self._SV(ynk2)
-            self._dSV_dt('backward-1') 
-            k3 = self.dSV_dt
-            ynk3 = initial_SV + k3*dt
-            self._SV(ynk3)
-            self._dSV_dt('backward-1') 
-            k4 = self.dSV_dt
-            averaged_dSV_dt = 1/6*(k1 + 2*k2 + 2*k3 + k4)*dt
-            final_SV = initial_SV + averaged_dSV_dt*dt
-            
-            # Applying boundary conditions
-            final_SV[0,0]=initial_SV[0,0] # set density
-            final_SV[1,0]=2*final_SV[1,1]-final_SV[1,2] # zero grad conditions
-            final_SV[2,0]=initial_SV[2,0] # set internal energy
-            # Zero grad conditions at outlet
-            final_SV[0,-1]=2*final_SV[0,-2]-final_SV[0,-3] 
-            final_SV[1,-1]=2*final_SV[1,-2]-final_SV[1,-3]
-            final_SV[2,-1]=2*final_SV[2,-2]-final_SV[2,-3]
-            
+    
         self._SV(final_SV)
         # Calculation of the residuals (dSV_dt*dt/SV)
         SV_residuals = abs(final_SV-initial_SV) / initial_SV
@@ -203,9 +258,11 @@ class Quasi1DCompressibleFlow():
                            plot=False,
                            plotStep=100,
                            showConvergenceProgress=False,
-                           method='MacCormack-1'):
+                           method='MacCormack'):
         '''
-        Performs the integration of 
+        Performs the integration of the problem according to the method
+        specified.
+        Methods includes 'MacCormack'
         '''
         residuals = []
         step = 0
@@ -280,30 +337,36 @@ def _test__dSV_dx():
     # Test of the differentiation method
     # Check that the array method returns the same output as the 
     # loop method where the scheme is more explicit
-    Tfun = lambda x: 2000*(1 - 1/3*x)**2    
-    length = 2.9
-    grid = np.linspace(0,length,30)
-    dx = grid[1] - grid[0]
-    SV_array = Tfun(grid)
-    # plt.plot(grid,SV_array)
-    SV_spatialBackwardDiff_arrayCalc = np.zeros(len(grid))
-    SV_spatialForwardDiff_arrayCalc = np.zeros(len(grid))
-    SV_spatialBackwardDiff_loop = np.zeros(len(grid))
-    SV_spatialForwardDiff_loop = np.zeros(len(grid))
-    SV_spatialBackwardDiff_arrayCalc[1:] = SV_array[1:] - SV_array[0:-1]
-    SV_spatialForwardDiff_arrayCalc[:-1] = SV_array[1:] - SV_array[0:-1]
-    for ii,SV in enumerate(SV_array):
-        if ii > 0: 
-            SV_spatialBackwardDiff_loop[ii] = SV_array[ii] - SV_array[ii-1]
-        if ii < (len(SV_array)-1):
-            SV_spatialForwardDiff_loop[ii] = SV_array[ii+1] - SV_array[ii]
-    SV_spatialBackwardDiff_arrayCalc[0] = 2*SV_spatialBackwardDiff_arrayCalc[1]-SV_spatialBackwardDiff_arrayCalc[2] # zeros gradient condition
-    SV_spatialBackwardDiff_loop[0] = 2*SV_spatialBackwardDiff_loop[1]-SV_spatialBackwardDiff_loop[2]
-    SV_spatialForwardDiff_arrayCalc[-1] = 2*SV_spatialForwardDiff_arrayCalc[-2]-SV_spatialForwardDiff_arrayCalc[-3] # zeros gradient condition
-    SV_spatialForwardDiff_loop[-1] = 2*SV_spatialForwardDiff_loop[-2]-SV_spatialForwardDiff_loop[-3]
-    plt.plot(grid,SV_spatialBackwardDiff_arrayCalc,label='SV_spatialBackwardDiff_arrayCalc')
-    plt.plot(grid,SV_spatialForwardDiff_arrayCalc,label='SV_spatialForwardDiff_arrayCalc')
-    plt.plot(grid,SV_spatialBackwardDiff_loop,'o',label='SV_spatialBackwardDiff_loop')
-    plt.plot(grid,SV_spatialForwardDiff_loop,'o',label='SV_spatialForwardDiff_loop')
-    plt.legend()
+    r00 = 1.2
+    Afun = lambda x: 1 + 2.2*(x-1.5)**2
+    rfun = lambda x: r00*(-0.3146*x**2+1)
+    nbrPoints = 31
+    grid = np.linspace(0,3,nbrPoints)
+    r0 = rfun(grid)
+    A = Afun(grid)
+    initialTimeState = {'r': r0,'u': np.zeros(nbrPoints),'e': np.zeros(nbrPoints)}
+    q1DCF = Quasi1DCompressibleFlow(grid,A=A,fluidModel='perfectgas',k=1.4,Mgas=0.028,mech='gri30_highT.cti')
+    q1DCF.setInitialTimeState(initialTimeState)
+    q1DCF._SV(q1DCF.SV)
+    methods = {'forward':{},
+                'backward':{}}
+    dx = q1DCF.dx
+    for method in methods:
+        q1DCF._dSV_dx(method)
+        SV_spatial = np.zeros(len(grid))
+        SV = q1DCF.r
+        for ii,r in enumerate(SV):
+            if method=='backward':
+                if ii>0:
+                    SV_spatial[ii] = (SV[ii] - SV[ii-1])/dx
+            if method=='forward':
+                if ii < (len(grid)-1):
+                    SV_spatial[ii] = (SV[ii+1] - SV[ii])/dx
+        methods[method]['array']=q1DCF.dSV_dx[0,:]
+        methods[method]['iteration']=SV_spatial
+        plt.plot(grid,methods[method]['iteration'],'o',label=method + '_iteration')
+        plt.plot(grid,methods[method]['array'],label=method + '_array')
+        plt.legend()
     return()
+
+# _test__dSV_dx()
