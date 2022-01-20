@@ -7,8 +7,10 @@ Created on Mon Dec 27 14:27:42 2021
 
 import numpy as np
 import matplotlib.pyplot as plt
-import massflowlib
-import correlationlib
+from rocketbox import massflowlib
+from rocketbox import correlationlib
+# import massflowlib
+# import correlationlib
 
 __version__ = 0.3 
 
@@ -77,6 +79,7 @@ class Quasi1DCompressibleFlow():
                 if stateVariable == 'e':
                     self.e = initialState[stateVariable]
                 self.SV = np.array([self.r,self.u,self.e])
+                self._SV(self.SV)
                 self.status = 'initialized'
             else:
                 print('Wrong number of points in {} during initialization'.format(stateVariable))
@@ -157,7 +160,7 @@ class Quasi1DCompressibleFlow():
         Update the value of the differential surface flux at current SV values
         '''
         self._hConv()
-        flux = self.hConv*(self.Tw - self.T)
+        flux = self.hConv*(self.T - self.Tw)
         dQdx = self.Geometry.heatExchangePerimeter*flux
         self.flux = flux
         self.dQdx = dQdx
@@ -213,7 +216,7 @@ class Quasi1DCompressibleFlow():
                  [0         ,p/r  ,u        ]]
             C = [r*u*dlnA_dx,
                  1/r*tau_w*Ph/A,
-                 1/(r*r*u*A)*dQdx + p*u/r*dlnA_dx]
+                 1/(r*A)*dQdx + p*u/r*dlnA_dx]
             dSV_dt[:,ii] = - np.matmul(M, np.transpose(dSV_dx[:,ii])) - C
         self.dSV_dt = dSV_dt
 
@@ -237,10 +240,11 @@ class Quasi1DCompressibleFlow():
             
             # Applying boundary conditions
             final_SV[0,0]=initial_SV[0,0] # set density
-            final_SV[1,0]=2*final_SV[1,1]-final_SV[1,2] # zero grad conditions
+            # final_SV[0,0]= # set density
+            final_SV[1,0]=2*initial_SV[1,1]-initial_SV[1,2] # zero grad conditions
             final_SV[2,0]=initial_SV[2,0] # set internal energy
             # Zero grad conditions at outlet
-            final_SV[0,-1]=2*final_SV[0,-2]-final_SV[0,-3] 
+            final_SV[0,-1]=2*final_SV[0,-2]-final_SV[0,-3]
             final_SV[1,-1]=2*final_SV[1,-2]-final_SV[1,-3]
             final_SV[2,-1]=2*final_SV[2,-2]-final_SV[2,-3]
     
@@ -280,7 +284,9 @@ class Quasi1DCompressibleFlow():
             if step == maxSteps:
                 break
             if plot and np.mod(step,plotStep)==0:
-                if 'fig' in locals():
+                if not('fig' in locals()):
+                    fig,ax = plt.subplots(10,1,figsize=(6, 10), dpi=400)
+                else:
                     plt.rcParams['xtick.labelbottom'] = False
                     ii=0
                     ax[ii].plot(self.Geometry.grid,self.r,label=str(step))
@@ -318,9 +324,7 @@ class Quasi1DCompressibleFlow():
                     ax[ii].set_yscale('log')
                     ax[ii].tick_params(axis='x',labelbottom='off') # labels along the bottom edge are off
                     ax[ii].set_xlabel('Axial position [m]')
-                else:
-                    fig,ax = plt.subplots(10,1,figsize=(6, 10), dpi=400)
-        
+                    
         if plot:
             plt.show()
             plt.rcParams['xtick.labelbottom'] = True
@@ -333,20 +337,77 @@ class Quasi1DCompressibleFlow():
 
     def writeResults(self):
         import h5py
-        
+    
+    def initSonicRocketFlow(self,P0,T0,X0,A,grid,process='quick'):
+        from scipy.interpolate import interp1d
+        r0 = np.zeros(len(grid))
+        e0 = np.zeros(len(grid))
+        u0 = np.zeros(len(grid))
+        self.gas.TPX = T0, P0, X0
+        # inlet
+        rSet = np.zeros(3)
+        eSet = np.zeros(3)
+        uSet = np.zeros(3)
+        if process == 'quick':
+            throatVelocity,throatDensity,throatPressure = self.gas.chokedNozzle(isentropicEfficiency=1, frozen=True)
+            massflow = throatVelocity*throatDensity*A[np.argmin(A)]
+            velocity,density,e = self.gas.isentropicMassflow(massflow,A[0],throatVelocity,case='subsonic')
+            rSet[0] = density
+            eSet[0] = e
+            uSet[0] = velocity
+            self.gas.SP = self.gas.entropy_mass, throatPressure
+            e = self.gas.int_energy_mass
+            rSet[1] = throatDensity
+            eSet[1] = e
+            uSet[1] = throatVelocity
+            velocity,density,e = self.gas.isentropicMassflow(massflow,A[-1],throatVelocity,case='supersonic',maxMach=5)
+            rSet[2] = density
+            eSet[2] = e
+            uSet[2] = velocity
+            gridSet = [grid[0],grid[np.argmin(A)],grid[-1]]
+            f = interp1d(gridSet, rSet, kind='linear')
+            r0 = f(grid)
+            f = interp1d(gridSet, eSet, kind='linear')
+            e0 = f(grid)
+            f = interp1d(gridSet, uSet, kind='linear')
+            u0 = f(grid)
+        if process == 'slow':
+            throatVelocity,throatDensity,throatPressure = self.gas.chokedNozzle(isentropicEfficiency=1, frozen=True)
+            massflow = throatVelocity*throatDensity*A[np.argmin(A)]
+            exhaustVelocity,exhaustDensity,e = self.gas.isentropicMassflow(massflow,A[-1],throatVelocity,case='supersonic',maxMach=5)
+            maxMach = exhaustVelocity/throatVelocity*1.1
+            for ii,z in enumerate(grid):
+                u,r,e = self.gas.sonicFlowArea(P0=P0,T0=T0,X0=X0,
+                                               throatDensity=throatDensity,
+                                               throatVelocity=throatVelocity,
+                                               A=A,index=ii,maxMach=maxMach)
+                r0[ii] = r
+                e0[ii] = e
+                u0[ii] = u
+        initialTimeState = {'r': r0,'u': u0,'e': e0}
+        self.setInitialTimeState(initialTimeState)
+        return()
+    
 def _test__dSV_dx():
+    import geometrylib
     # Test of the differentiation method
     # Check that the array method returns the same output as the 
     # loop method where the scheme is more explicit
-    r00 = 1.2
-    Afun = lambda x: 1 + 2.2*(x-1.5)**2
-    rfun = lambda x: r00*(-0.3146*x**2+1)
     nbrPoints = 31
-    grid = np.linspace(0,3,nbrPoints)
+    geometry = geometrylib.OneDGeometry()
+    geometry.andersonConstructor(throatDiameter=1,nbrPoints=nbrPoints)
+    r00 = 1.2
+    rfun = lambda x: r00*(-0.3146*x**2+1)
+    grid = geometry.grid
     r0 = rfun(grid)
-    A = Afun(grid)
     initialTimeState = {'r': r0,'u': np.zeros(nbrPoints),'e': np.zeros(nbrPoints)}
-    q1DCF = Quasi1DCompressibleFlow(grid,A=A,fluidModel='perfectgas',k=1.4,Mgas=0.028,mech='gri30_highT.cti')
+    q1DCF = Quasi1DCompressibleFlow(geometry,
+                                    fluidModel='perfectgas',
+                                    k=1.4,
+                                    Mgas = 0.028,
+                                    Tw=600,
+                                    wallHeatFluxCorrelation='adiabatic', # bartz,adiabatic
+                                    wallShearStressCorrelation='non-viscous') # non-viscous, moody_bulk
     q1DCF.setInitialTimeState(initialTimeState)
     q1DCF._SV(q1DCF.SV)
     methods = {'forward':{},
@@ -370,4 +431,30 @@ def _test__dSV_dx():
         plt.legend()
     return()
 
+def _test_initSonicRocketFlow():
+    import geometrylib
+    geometry = geometrylib.OneDGeometry()
+    geometry.andersonConstructor(throatDiameter=0.005,nbrPoints=31)
+    mech = 'gri30_highT.xml'
+    submech = 'gri30_mix'
+    fluidModel = 'cantera'
+    q1DCF = Quasi1DCompressibleFlow(geometry,
+                                    fluidModel=fluidModel,
+                                    mech=mech, 
+                                    submech=submech,
+                                    Tw=600,
+                                    wallHeatFluxCorrelation='bartz', # bartz,adiabatic
+                                    wallShearStressCorrelation='non-viscous') # non-viscous, moody_bulk
+    T0 = 300
+    P0 = 25e5
+    X0 = 'CH4:1,O2:2'
+    q1DCF.gas.TPX = T0,P0,X0
+    q1DCF.gas.equilibrate('HP')
+    T0 = q1DCF.gas.T
+    X0 = q1DCF.gas.X
+    q1DCF.initSonicRocketFlow(P0,T0,X0,geometry.crossSection,geometry.grid,process='slow')
+    # plt.plot(geometry.grid,q1DCF.h+0.5*(q1DCF.u**2))
+    # plt.plot(geometry.grid,q1DCF.p + 0.5*q1DCF.r*(q1DCF.u**2))
+       
 # _test__dSV_dx()
+# _test_initSonicRocketFlow()

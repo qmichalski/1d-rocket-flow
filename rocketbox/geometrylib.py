@@ -34,6 +34,8 @@ class OneDGeometry():
                                 convergentAngle,
                                 throatDiameter,
                                 roughness,
+                                nozzleLength,
+                                nozzleDiameter,
                                 nbrPoints=500,
                                 nozzleType='bellApproximation',plot=False):
         
@@ -41,15 +43,13 @@ class OneDGeometry():
         import numpy as np
         import matplotlib.pyplot as plt
         innerCoreDiameter = 0
-        xSet = np.linspace(0,combustionChamberLength,nbrPoints)
+        xSet = np.linspace(0,combustionChamberLength+nozzleLength,nbrPoints)
         ySet = np.zeros(len(xSet))
-        channelSectionSet = np.zeros(len(xSet))
-        channelSectionDerivativeSet = np.zeros(len(xSet))
-        channelPerimeterSet = np.zeros(len(xSet))
         
         LC = combustionChamberLength
         Rt = throatDiameter/2
         RC = chamberDiameter/2
+        Rn = nozzleDiameter/2
         Rconge = Rt
         
         convergentAngleMax = np.arctan(((RC-2.5*Rt)**2/((1.5*Rt)**2-(RC-2.5*Rt)**2))**(1/2))/np.pi*180
@@ -69,7 +69,14 @@ class OneDGeometry():
         xD = xB - Rconge*np.cos(np.pi/2-convergentAngleRad)
         xA = xD
         yA = RC
-        
+        Rthroatnozzle = 1.5*Rt
+        fun = lambda theta: np.tan(theta)-(Rn-(Rt+Rthroatnozzle*(1-np.cos(theta))))/(nozzleLength-Rthroatnozzle*np.sin(theta))
+        thetaN = root(fun,0)['x'][0]
+        # thetaN = 30/180*np.pi
+        # plt.plot(np.linspace(0,45,100),fun(np.linspace(0,np.pi/4,100)))
+        xN = Rthroatnozzle*np.sin(thetaN) + LC
+        yN = Rthroatnozzle*(1-np.cos(thetaN)) + Rt
+        # print(thetaN*180/np.pi,xN,yN)
         for ii,x in enumerate(xSet):
             if x <= xA:
                 ySet[ii] = RC
@@ -79,10 +86,11 @@ class OneDGeometry():
             if xB < x <= xK:
                 ySet[ii] = RC - np.tan(convergentAngleRad)*(x-(xK-dxC))
             if (xK) < x <= combustionChamberLength:
-                ySet[ii] = 2.5*Rt - ((1.5*Rt)**2 - (LC-x)**2)**(1/2)
-            if LC < x:
-                ySet[ii] = 2.5*Rt - ((1.5*Rt)**2 - (LC-x)**2)**(1/2)
-        
+                ySet[ii] = (1+1.5)*Rt - ((1.5*Rt)**2 - (LC-x)**2)**(1/2)
+            if LC < x <= xN:
+                ySet[ii] = Rt+Rthroatnozzle - (Rthroatnozzle**2 - (LC-x)**2)**(1/2)
+            if xN < x:
+                ySet[ii] = yN + np.tan(thetaN)*(x-xN)
         # model properties
         self._gridLength = xSet[-1]
         self._chamberDiameter = chamberDiameter
@@ -98,18 +106,18 @@ class OneDGeometry():
         self.roughness = roughness*np.ones(len(xSet))
         
         if plot:
+            RC = np.max(self.hydraulicDiameter)/2
             plt.figure(figsize=(6, 6*5*RC/(LC*1.2)), dpi=400)
-            plt.plot(self.grid,self.hydraulicDiameter,color='k')
-            plt.plot(self.grid,-self.hydraulicDiameter,color='k')
-            plt.xlim([0,LC*1.2])
-            plt.ylim([-RC*2.5,RC*2.5])
-            
+            plt.plot(self.grid,self.hydraulicDiameter/2,'-',color='k')
+            plt.plot(self.grid,-self.hydraulicDiameter/2,'-',color='k')
+            plt.xlim([0,self.grid[-1]*1.2])
+            plt.ylim([-RC*1.2,RC*1.2])
             plt.show()
         
-    def andersonConstructor(self, nbrPoints=51, roughness=10e-6, plot=False):
+    def andersonConstructor(self, throatDiameter = 1, nbrPoints=51, roughness=10e-6, plot=False):
         import numpy as np
         import matplotlib.pyplot as plt
-        Afun = lambda x: 1 + 2.2*(x-1.5)**2
+        Afun = lambda x: throatDiameter*(1 + 2.2*(x-1.5)**2)
         length = 3
         grid = np.linspace(0,length,nbrPoints)
         self.grid = grid
@@ -119,17 +127,25 @@ class OneDGeometry():
         self.heatExchangePerimeter = self.hydraulicPerimeter
         self.roughness = roughness*np.ones(nbrPoints)
         if plot:
-            RC = np.max(self.hydraulicDiameter)
+            RC = np.max(self.hydraulicDiameter)/2
             plt.figure(figsize=(6, 6*5*RC/(length*1.2)), dpi=400)
-            plt.plot(self.grid,self.hydraulicDiameter,color='k')
-            plt.plot(self.grid,-self.hydraulicDiameter,color='k')
+            plt.plot(self.grid,self.hydraulicDiameter/2,color='k')
+            plt.plot(self.grid,-self.hydraulicDiameter/2,color='k')
             plt.xlim([0,length*1.2])
             plt.ylim([-RC*2.5,RC*2.5])
         
 def _test_rocketEngineConstructor():
     geometry = OneDGeometry()
-    geometry.rocketEngineConstructor(100e-3,50e-3,45,25e-3,10e-6,plot=True)
-    geometry.andersonConstructor(plot=True)
+    geometry.rocketEngineConstructor(combustionChamberLength=100e-3,
+                                     chamberDiameter=50e-3,
+                                     convergentAngle=25,
+                                     throatDiameter=25e-3,
+                                     roughness=10e-6,
+                                     nozzleLength=50e-3,
+                                     nozzleDiameter=50e-3,
+                                     plot=True,nbrPoints=500)
+    
+    # geometry.andersonConstructor(plot=True)
     return()
 
 # _test_rocketEngineConstructor()
