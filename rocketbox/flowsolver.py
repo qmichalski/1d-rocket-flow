@@ -62,7 +62,7 @@ class Quasi1DCompressibleFlow():
         self.SV_names = ['r','u','e'] # state variable list
         self.SV = np.array([self.r,self.u,self.e]) # stores the state variables
         self.SV_nbr = len(self.SV_names) # number of state variables
-        self.dx = self.Geometry.grid[1]-self.Geometry.grid[0] # spatial step
+        # self.dx = self.Geometry.grid[1]-self.Geometry.grid[0] # spatial step
         # Store the residual value of the state variables
         self.SV_residuals = np.array([np.ones(self.nbrPoints),
                                       np.ones(self.nbrPoints), 
@@ -91,17 +91,17 @@ class Quasi1DCompressibleFlow():
         '''
         if method == 'backward':
             SV_spatialBackwardDiff = np.zeros((3,self.nbrPoints))
-            SV_spatialBackwardDiff[:,1:] = (self.SV[:,1:] - self.SV[:,0:-1])/self.dx
+            SV_spatialBackwardDiff[:,1:] = (self.SV[:,1:] - self.SV[:,0:-1])/(self.Geometry.grid[1:]-self.Geometry.grid[0:-1])
             self.dSV_dx = SV_spatialBackwardDiff
             dlnA_dx = np.zeros(self.nbrPoints)
-            dlnA_dx[1:] = (np.log(self.A[1:]) - np.log(self.A[0:-1]))/self.dx
+            dlnA_dx[1:] = (np.log(self.A[1:]) - np.log(self.A[0:-1]))/(self.Geometry.grid[1:]-self.Geometry.grid[0:-1])
             self.dlnA_dx = dlnA_dx
         if method == 'forward':
             SV_spatialForwardDiff = np.zeros((3,self.nbrPoints))
-            SV_spatialForwardDiff[:,:-1] = (self.SV[:,1:] - self.SV[:,0:-1])/self.dx
+            SV_spatialForwardDiff[:,:-1] = (self.SV[:,1:] - self.SV[:,0:-1])/(self.Geometry.grid[1:]-self.Geometry.grid[0:-1])
             self.dSV_dx = SV_spatialForwardDiff
             dlnA_dx = np.zeros(self.nbrPoints)
-            dlnA_dx[:-1] = (np.log(self.A[1:]) - np.log(self.A[0:-1]))/self.dx
+            dlnA_dx[:-1] = (np.log(self.A[1:]) - np.log(self.A[0:-1]))/(self.Geometry.grid[1:]-self.Geometry.grid[0:-1])
             self.dlnA_dx = dlnA_dx
 
     def _SV(self,SV):
@@ -222,7 +222,7 @@ class Quasi1DCompressibleFlow():
 
     def _integrationStep(self,CFL,method='MacCormack'):
         # Adaptive dt for stability using constant CFL
-        dt = CFL*np.min(self.dx/(self.u+self.a))
+        dt = CFL*np.min((self.Geometry.grid[1:]-self.Geometry.grid[0:-1])/(self.u[1:]+self.a[1:]))
         initial_SV = self.SV
         if method == 'MacCormack':
             # Calculation of the predictor
@@ -240,7 +240,7 @@ class Quasi1DCompressibleFlow():
             
             # Applying boundary conditions
             final_SV[0,0]=initial_SV[0,0] # set density
-            # final_SV[0,0]= # set density
+            # final_SV[1,0]=initial_SV[1,0] # set density
             final_SV[1,0]=2*initial_SV[1,1]-initial_SV[1,2] # zero grad conditions
             final_SV[2,0]=initial_SV[2,0] # set internal energy
             # Zero grad conditions at outlet
@@ -264,6 +264,7 @@ class Quasi1DCompressibleFlow():
                            plotStep=100,
                            showConvergenceProgress=False,
                            method='MacCormack'):
+        residualSaveStep = 50
         '''
         Performs the integration of the problem according to the method
         specified.
@@ -271,11 +272,13 @@ class Quasi1DCompressibleFlow():
         '''
         residuals = []
         step = 0
-        maximumResidual = np.max(self.SV_residuals[:,1:].flatten())
+        # maximumResidual = np.max(abs(self.SV_residuals[:,1:].flatten()))
+        maximumResidual = np.max(abs(self.SV_residuals[2,1:].flatten()))
         while maximumResidual>tol:
             self._integrationStep(CFL, method=method)
             maximumResidual = np.max(self.SV_residuals[:,1:].flatten())
-            residuals.append(maximumResidual)
+            if np.mod(step,residualSaveStep) == 0:
+                residuals.append(np.max(abs(self.SV_residuals[:,1:]),1))
             step += 1
             if showConvergenceProgress:
                 print(maximumResidual,

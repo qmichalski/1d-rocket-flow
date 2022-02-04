@@ -29,15 +29,43 @@ for ii,nbrPoint in enumerate(nbrPointsSet):
     
     geometry = geometrylib.OneDGeometry()
     # geometry.andersonConstructor(throatDiameter=D0,nbrPoints=51)
-    geometry.rocketEngineConstructor(combustionChamberLength=10e-3,
-                                      chamberDiameter=25e-3,
+    # geometry.rocketEngineConstructor(combustionChamberLength=50e-3,
+    #                                   chamberDiameter=25e-3,
+    #                                   convergentAngle=45,
+    #                                   throatDiameter=15e-3,
+    #                                   nozzleDiameter=20e-3,
+    #                                   nozzleLength=10e-3,
+    #                                   roughness=10e-6,
+    #                                   nbrPoints=50,
+    #                                   nozzleType='bellApproximation',plot=True)
+    
+    innerCoreDict = {
+        'type':'convergent',
+        'channelWidth':5e-3,
+        'flatLength':30e-3,
+        'innerAngle':21.8/180*np.pi
+        }
+    
+    geometry.rocketEngineConstructor(combustionChamberLength=100e-3,
+                                      chamberDiameter=50e-3,
                                       convergentAngle=45,
-                                      throatDiameter=15e-3,
-                                      nozzleDiameter=20e-3,
-                                      nozzleLength=30e-3,
+                                      throatDiameter=25e-3,
                                       roughness=10e-6,
-                                      nbrPoints=101,
-                                      nozzleType='bellApproximation',plot=True)
+                                      nozzleLength=15e-3,
+                                      nozzleDiameter=30e-3,
+                                      innerCore=False,
+                                      plot=True,nbrPoints=100)
+    
+    # geometry.rdeEngineConstructor(outerFlatLength=innerCoreDict['flatLength'],
+    #                               chamberDiameter=100e-3,
+    #                               convergentAngle=15,
+    #                               throatDiameter=30.8e-3,
+    #                               roughness=10e-6,
+    #                               nozzleLength=15e-3,
+    #                               nozzleDiameter=35e-3,
+    #                               innerCore=True,
+    #                               innerCoreDict=innerCoreDict,
+    #                               plot=True,nbrPoints=100)
     
     T0 = 300
     P0 = 5e5
@@ -66,20 +94,20 @@ for ii,nbrPoint in enumerate(nbrPointsSet):
                                                         wallHeatFluxCorrelation='bartz', # bartz,adiabatic
                                                         wallShearStressCorrelation='non-viscous') # non-viscous, moody_bulk
      
-    q1DCF_nonideal.initSonicRocketFlow(P0,T0,X0,geometry.crossSection,geometry.grid,process='quick')
+    q1DCF_nonideal.initSonicRocketFlow(P0,T0,X0,geometry.crossSection,geometry.grid,process='slow')
     u0=q1DCF_nonideal.u
     r0=q1DCF_nonideal.r
     print('{} case initialized'.format(nbrPoint))
     
     t1 = time()
-    sol = q1DCF_nonideal.solveSteadyQuasi1D(  CFL=0.5,
-                                              tol=1e-6,
+    sol = q1DCF_nonideal.solveSteadyQuasi1D(  CFL=0.9,
+                                              tol=1e-5,
                                               maxSteps=None,
                                               fullOutput=True,
                                               plot=False,
                                               plotStep=100,
                                               showConvergenceProgress=False,
-                                              method='MacCormack' ) #MacCormack
+                                              method='MacCormack'  ) #MacCormack
     
     t2 = time()
     print( '{} case solved'.format(nbrPoint) )
@@ -87,6 +115,7 @@ for ii,nbrPoint in enumerate(nbrPointsSet):
     ht = q1DCF_nonideal.h+0.5*q1DCF_nonideal.u**2
     massflow = q1DCF_nonideal.r*q1DCF_nonideal.u*q1DCF_nonideal.Geometry.crossSection
     print('D0 {} mm | P0 {} bar | Energy loss {}%'.format(D0*1e3,P0,(ht[-1]-ht[0])/DrH*100))
+    
     # # q1DCF.gas.HS = ht0, s00
     # # velocity,density,throatPressure = q1DCF.gas.chokedNozzle(isentropicEfficiency=1, frozen=True)
     # # massflow0 = velocity*density*A[throatIndex]
@@ -107,7 +136,9 @@ for ii,nbrPoint in enumerate(nbrPointsSet):
     # # print('Area derivative around throat : ({},{}) '.format(q1DCF.dlnA_dx[throatIndex],q1DCF.dlnA_dx[throatIndex+1]))
     # # print('Mach number at throat : {}'.format(q1DCF.M[throatIndex]))
     # # print('Grid is {} points - Massflow residual = {}'.format(q1DCF.nbrPoints,massflowRatio))
-    # plt.plot(sol['iterations'],sol['max_residuals'])
+    plt.plot(sol['max_residuals'],label=['density','velocity','energy'])
+    plt.yscale('log')
+    plt.legend()
     # plt.xlabel('Iteration [-]')
     # plt.ylabel('Max of normalized residuals [-]')
     # plt.yscale('log')
