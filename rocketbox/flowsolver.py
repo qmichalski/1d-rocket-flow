@@ -68,6 +68,7 @@ class Quasi1DCompressibleFlow():
                                       np.ones(self.nbrPoints), 
                                       np.ones(self.nbrPoints)])
         self.status = 'created'
+        self.bounded = False
         
     def setInitialTimeState(self,initialState):
         for stateVariable in initialState:
@@ -247,7 +248,39 @@ class Quasi1DCompressibleFlow():
             final_SV[0,-1]=2*final_SV[0,-2]-final_SV[0,-3]
             final_SV[1,-1]=2*final_SV[1,-2]-final_SV[1,-3]
             final_SV[2,-1]=2*final_SV[2,-2]-final_SV[2,-3]
-    
+        if method == 'MacCormack-Bounded':    
+            # Calculation of the predictor
+            self._dSV_dt('forward')
+            predictor_dSV_dt = self.dSV_dt
+            predictor_SV = initial_SV + predictor_dSV_dt*dt
+            # evaluation of SV at predictor values
+            self._SV(predictor_SV)
+            # Calculation of the corrector from predictor values
+            self._dSV_dt('backward')
+            corrector_dSV_dt = self.dSV_dt
+            # Calculation of the final time derivative (second order accuracy)
+            averaged_dSV_dt = 0.5*(predictor_dSV_dt+corrector_dSV_dt)
+            # Applying boundary conditions
+            final_SV = initial_SV + averaged_dSV_dt*dt
+            final_SV[0,0]=initial_SV[0,0] # set density
+            # final_SV[1,0]=initial_SV[1,0] # set density
+            final_SV[1,0]=2*initial_SV[1,1]-initial_SV[1,2] # zero grad conditions
+            final_SV[2,0]=initial_SV[2,0] # set internal energy
+            # Zero grad conditions at outlet
+            final_SV[0,-1]=2*final_SV[0,-2]-final_SV[0,-3]
+            final_SV[1,-1]=2*final_SV[1,-2]-final_SV[1,-3]
+            final_SV[2,-1]=2*final_SV[2,-2]-final_SV[2,-3]
+            # Bounding the new values by min and max
+            # for ii,SV in enumerate(final_SV[0:-1,:]):
+            #     bounded = False
+            #     for jj,sv in enumerate(SV):
+            #         minBound = np.min([initial_SV[ii,jj],initial_SV[ii+1,jj]])
+            #         maxBound = np.max([initial_SV[ii,jj],initial_SV[ii+1,jj]])
+            #         if minBound >= final_SV[ii,jj] or final_SV[ii,jj] >= maxBound:
+            #             bounded = True
+            #     if bounded:
+            #         final_SV[ii,:] = predictor_SV[ii,:]
+            # self.bounded = bounded
         self._SV(final_SV)
         # Calculation of the residuals (dSV_dt*dt/SV)
         SV_residuals = abs(final_SV-initial_SV) / initial_SV
@@ -255,9 +288,11 @@ class Quasi1DCompressibleFlow():
         SV_residuals[2,0] = np.nan
         self.SV_residuals = SV_residuals
             
+    def solveSteadyQuasi1D(self,
+                           
     def solveSteadyQuasi1D(self, 
                            CFL=0.3, 
-                           tol=1e-6, 
+                           tol=[0,1e-6],
                            maxSteps=None, 
                            fullOutput=False, 
                            plot=False,
@@ -271,19 +306,21 @@ class Quasi1DCompressibleFlow():
         Methods includes 'MacCormack'
         '''
         residuals = []
+        residualsStep = []
         step = 0
         # maximumResidual = np.max(abs(self.SV_residuals[:,1:].flatten()))
-        maximumResidual = np.max(abs(self.SV_residuals[2,1:].flatten()))
-        while maximumResidual>tol:
+        maximumResidual = np.max(abs(self.SV_residuals[tol[0],1:].flatten()))
+        while maximumResidual>tol[1]:
             self._integrationStep(CFL, method=method)
             maximumResidual = np.max(self.SV_residuals[:,1:].flatten())
             if np.mod(step,residualSaveStep) == 0:
                 residuals.append(np.max(abs(self.SV_residuals[:,1:]),1))
+                residualsStep.append(step)
             step += 1
-            if showConvergenceProgress:
+            if showConvergenceProgress and np.mod(step,plotStep)==0:
                 print(maximumResidual,
                       np.unravel_index(np.argmax(self.SV_residuals[:,1:]),
-                                       self.SV_residuals[:,1:].shape))
+                                       self.SV_residuals[:,1:].shape),step)
             if step == maxSteps:
                 break
             if plot and np.mod(step,plotStep)==0:
@@ -341,7 +378,7 @@ class Quasi1DCompressibleFlow():
     def writeResults(self):
         import h5py
     
-    def initSonicRocketFlow(self,P0,T0,X0,A,grid,process='quick'):
+    def initSonicRocketFlow(self,P0,T0,X0,A,grid,process='fast'):
         from scipy.interpolate import interp1d
         r0 = np.zeros(len(grid))
         e0 = np.zeros(len(grid))
@@ -351,7 +388,7 @@ class Quasi1DCompressibleFlow():
         rSet = np.zeros(3)
         eSet = np.zeros(3)
         uSet = np.zeros(3)
-        if process == 'quick':
+        if process == 'fast':
             throatVelocity,throatDensity,throatPressure = self.gas.chokedNozzle(isentropicEfficiency=1, frozen=True)
             massflow = throatVelocity*throatDensity*A[np.argmin(A)]
             velocity,density,e = self.gas.isentropicMassflow(massflow,A[0],throatVelocity,case='subsonic')
@@ -387,6 +424,11 @@ class Quasi1DCompressibleFlow():
                 r0[ii] = r
                 e0[ii] = e
                 u0[ii] = u
+            from scipy.signal import savgol_filter
+            # N = 7
+            # r0 = np.convolve(r0, np.ones(N)/N, mode='valid')
+            # u0 = np.convolve(u0, np.ones(N)/N, mode='valid')
+            # e0 = np.convolve(e0, np.ones(N)/N, mode='valid')
         initialTimeState = {'r': r0,'u': u0,'e': e0}
         self.setInitialTimeState(initialTimeState)
         return()

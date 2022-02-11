@@ -156,7 +156,8 @@ class OneDGeometry():
             plt.show()
             
             plt.plot(self.crossSection)
-
+            plt.show()
+            
     def rdeEngineConstructor(self,
                             outerFlatLength,
                             chamberDiameter,
@@ -266,13 +267,29 @@ class OneDGeometry():
                 # for ii,x in enumerate(xSet):
                 #     if (xK) < x <= combustionChamberLength:
                 #         ySet[ii] = (1+1.5)*Rt - ((1.5*Rt)**2 - (LC-x)**2)**(1/2)
-                
+        
+        smoothing = False
+        if smoothing:
+            from scipy.signal import savgol_filter
+            ySet = savgol_filter(ySet, 7, 2)
+            ySet_inner_final_index = np.where(ySet_inner==0)[0][0]
+            ySet_inner = savgol_filter(ySet_inner, 7, 2)
+            ySet_inner[ySet_inner_final_index:] = 0
+        
+        N = 7
+        ySet[int((N-1)/2):-int((N-1)/2)] = np.convolve(ySet, np.ones(N)/N, mode='valid')
+        ySet_inner_final_index = np.where(ySet_inner==0)[0][0]
+        ySet_inner[int((N-1)/2):-int((N-1)/2)] = np.convolve(ySet_inner, np.ones(N)/N, mode='valid')
+        ySet_inner[ySet_inner_final_index:] = 0
+        
         # model properties
         self._gridLength = xSet[-1]
         self._chamberDiameter = chamberDiameter
         self._convergentAngle = convergentAngle
         self._throatDiameter = throatDiameter
         self._nbrPoints = nbrPoints
+        self._innerCore = ySet_inner
+        self._outerCore = ySet
         # essential properties
         self.grid = xSet
         self.crossSection = np.pi*(ySet**2 - ySet_inner**2)
@@ -286,8 +303,8 @@ class OneDGeometry():
             plt.figure(figsize=(6, 6*5*RC/(LC*1.2)), dpi=400)
             plt.plot(self.grid,ySet,'-',color='k')
             plt.plot(self.grid,-ySet,'-',color='k')
-            plt.plot(self.grid,ySet_inner,'-x',color='b')
-            plt.plot(self.grid,-ySet_inner,'-x',color='b')
+            plt.plot(self.grid[ySet_inner>0],ySet_inner[ySet_inner>0],'-',color='b')
+            plt.plot(self.grid[ySet_inner>0],-ySet_inner[ySet_inner>0],'-',color='b')
             
             plt.xlim([0,self.grid[-1]*1.2])
             # plt.xlim([0.025,0.05])
@@ -299,7 +316,7 @@ class OneDGeometry():
             # plt.legend()
             plt.show()
             
-            plt.plot(self.crossSection)
+            # plt.plot(self.crossSection)
 
     def andersonConstructor(self, throatDiameter = 1, nbrPoints=51, roughness=10e-6, plot=False):
         import numpy as np
@@ -321,7 +338,7 @@ class OneDGeometry():
             plt.xlim([0,length*1.2])
             plt.ylim([-RC*2.5,RC*2.5])
         
-def _test_rocketEngineConstructor():
+def _test_rocketEngineConstructor(output=False):
     import numpy as np
     geometry = OneDGeometry()
     # geometry.rocketEngineConstructor(combustionChamberLength=100e-3,
@@ -362,8 +379,22 @@ def _test_rocketEngineConstructor():
                                   plot=True,nbrPoints=100)
     
     # geometry.andersonConstructor(plot=True)
-    return()
+    if output:
+        return(geometry)
 
 if __name__ == "__main__":
-
-    _test_rocketEngineConstructor()
+    from scipy.signal import savgol_filter
+    import numpy as np
+    import matplotlib.pyplot as plt
+    geometry = _test_rocketEngineConstructor(output=True)
+    yp = geometry._outerCore
+    ym = geometry._innerCore
+    plt.plot(yp,'x')
+    # plt.plot(np.diff(yp),'x')
+    N = 7
+    yp[int((N-1)/2):-int((N-1)/2)] = np.convolve(yp, np.ones(N)/N, mode='valid')
+    plt.plot(yp,'x')
+    ym = np.convolve(ym, np.ones(N)/N, mode='valid')
+    # plt.plot(ym)
+    # plt.plot(ymhat)
+    
